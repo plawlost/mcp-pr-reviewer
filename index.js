@@ -7,7 +7,6 @@
 const path = require('path');
 const fetch = require('node-fetch');
 const { spawn } = require('child_process');
-// const MCP = require('@modelcontextprotocol/server-github'); // No longer required here for the default export
 const chalk = require('chalk');
 
 // Path to the library directory
@@ -73,56 +72,8 @@ function startLLMProvider(options = {}) {
   return server;
 }
 
-/**
- * Analyze a PR
- * @param {Object} options - Analysis options
- * @param {string} options.owner - Repository owner
- * @param {string} options.repo - Repository name
- * @param {number|string} options.prNumber - Pull Request number
- * @returns {Promise<string>} The analysis result
- */
-async function analyzePR(options) {
-  if (!options.owner || !options.repo || !options.prNumber) {
-    throw new Error('Missing required parameters: owner, repo, and prNumber are required');
-  }
-  
-  const analyzer = spawn('node', [
-    path.join(LIB_DIR, 'analyze-pr.js'),
-    options.owner,
-    options.repo,
-    options.prNumber
-  ], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: process.env
-  });
-  
-  return new Promise((resolve, reject) => {
-    let output = '';
-    
-    analyzer.stdout.on('data', (data) => {
-      output += data.toString();
-    });
-    
-    analyzer.stderr.on('data', (data) => {
-      console.error(`Error: ${data.toString()}`);
-    });
-    
-    analyzer.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(`Analysis failed with code ${code}`));
-      } else {
-        resolve(output);
-      }
-    });
-  });
-}
-
-// Export the API
+// Export only the necessary functions for the CLI
 module.exports = {
-  startMCPGitHubServerProcess, // Export the process spawner
+  startMCPGitHubServerProcess,
   startLLMProvider,
-  analyzePR,
-  
-  // Export the CLI entry point for programmatic usage
-  cli: require('./bin/cli')
 }; 
