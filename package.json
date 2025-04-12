@@ -1,6 +1,6 @@
 {
     "name": "mcp-pr-reviewer",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "description": "Intelligent PR reviews powered by the Model Context Protocol and LLMs",
     "main": "index.js",
     "bin": {
