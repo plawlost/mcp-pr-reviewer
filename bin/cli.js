@@ -39,31 +39,11 @@ program
       }
 
       // Verify GitHub token is present
-      if (!process.env.GITHUB_TOKEN) {
-        console.warn(chalk.yellow('Warning: GITHUB_TOKEN environment variable is not set'));
+      if (!process.env.GITHUB_TOKEN && !process.env.GITHUB_PERSONAL_ACCESS_TOKEN) {
+        console.warn(chalk.yellow('Warning: GITHUB_TOKEN or GITHUB_PERSONAL_ACCESS_TOKEN environment variable is not set'));
         console.warn(chalk.yellow('This may limit access to private repositories'));
       }
 
-      console.log(chalk.blue('Starting MCP GitHub server...'));
-      
-      // Start MCP GitHub server
-      const mcpGithubServer = spawn('npx', ['@modelcontextprotocol/server-github'], {
-        stdio: 'pipe',
-        shell: true
-      });
-      
-      // Handle server output
-      mcpGithubServer.stdout.on('data', (data) => {
-        console.log(chalk.dim(`[MCP GitHub] ${data.toString().trim()}`));
-      });
-      
-      mcpGithubServer.stderr.on('data', (data) => {
-        console.error(chalk.red(`[MCP GitHub] ${data.toString().trim()}`));
-      });
-      
-      // Wait a moment for server to start
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
       console.log(chalk.blue('Starting LLM provider...'));
       
       // Start LLM provider
@@ -100,8 +80,7 @@ program
       
       // Wait for analysis to complete
       analyzer.on('close', (code) => {
-        // Cleanup
-        mcpGithubServer.kill();
+        // Cleanup - Only need to kill LLM provider now
         llmProvider.kill();
         
         if (code !== 0) {
@@ -117,11 +96,11 @@ program
     }
   });
 
-// Server command for GitHub Actions
+// Server command - Starts the PR Reviewer LLM Analyzer MCP server
 program
   .command('server')
-  .description('Start the server for GitHub Actions')
-  .option('-p, --port <port>', 'Port to run on (default: 8090)')
+  .description('Start the PR Reviewer LLM Analyzer MCP server')
+  .option('-p, --port <port>', 'Port to run the MCP server on (default: 8090)')
   .option('-m, --model <model>', 'Specify LLM model to use (default: openrouter/optimus-alpha)')
   .action((options) => {
     try {
@@ -131,25 +110,41 @@ program
       
       // Verify OpenRouter API key is present
       if (!process.env.OPENROUTER_API_KEY) {
-        console.error(chalk.red('Error: OPENROUTER_API_KEY environment variable is required'));
+        console.error(chalk.red('Error: OPENROUTER_API_KEY environment variable is required for the server.'));
         process.exit(1);
       }
       
-      console.log(chalk.blue(`Starting server on port ${process.env.LLM_PROVIDER_PORT || 8090}...`));
+      const serverPort = process.env.LLM_PROVIDER_PORT || 8090;
+      console.log(chalk.blue(`Starting PR Reviewer LLM Analyzer MCP server on port ${serverPort}...`));
       
-      // Start LLM provider
-      const llmProvider = spawn('node', [path.join(SCRIPTS_DIR, 'mcp-llm-provider.js')], {
-        stdio: 'inherit',
+      // Start the refactored MCP server script
+      const mcpServerProcess = spawn('node', [path.join(SCRIPTS_DIR, 'mcp-llm-provider.js')], {
+        stdio: 'inherit', // Show server logs directly
         env: process.env
       });
       
-      // Handle process termination
-      process.on('SIGINT', () => {
-        llmProvider.kill();
-        process.exit(0);
+      // Handle termination
+      mcpServerProcess.on('close', (code) => {
+         console.log(`MCP Server process exited with code ${code}`);
+         process.exit(code || 0);
       });
+      mcpServerProcess.on('error', (err) => {
+        console.error(chalk.red(`Failed to start MCP server: ${err.message}`));
+        process.exit(1);
+      });
+
+      // Graceful shutdown
+      process.on('SIGINT', () => {
+        console.log('\nGracefully shutting down MCP server...');
+        mcpServerProcess.kill('SIGINT'); 
+      });
+      process.on('SIGTERM', () => {
+        console.log('Gracefully shutting down MCP server...');
+        mcpServerProcess.kill('SIGTERM');
+      });
+
     } catch (error) {
-      console.error(chalk.red(`Error: ${error.message}`));
+      console.error(chalk.red(`Error starting server: ${error.message}`));
       process.exit(1);
     }
   });

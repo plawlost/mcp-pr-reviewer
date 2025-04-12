@@ -81,6 +81,7 @@ jobs:
           kill $MCP_GITHUB_PID
           kill $LLM_PROVIDER_PID
         env:
+          GITHUB_PERSONAL_ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           MCP_GITHUB_PORT: 8080

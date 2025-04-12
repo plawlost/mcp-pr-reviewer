@@ -1,46 +1,48 @@
 // .github/scripts/mcp-llm-provider.js
-// This server acts as an OpenRouter LLM provider separate from the MCP GitHub server
-// It provides LLM analysis capabilities while the MCP GitHub server handles GitHub interactions
+// This server acts as a dedicated MCP server for PR analysis using OpenRouter.
+// It expects to receive the PR diff content via an MCP call.
 const express = require('express');
 const OpenAI = require('openai');
 const app = express();
-const port = process.env.LLM_PROVIDER_PORT || 8090; // Use a different port than MCP GitHub server
+const port = process.env.LLM_PROVIDER_PORT || 8090; // Port for this specific MCP server
 
 app.use(express.json());
+
+// Ensure API Key is available
+if (!process.env.OPENROUTER_API_KEY) {
+  console.error('FATAL ERROR: OPENROUTER_API_KEY environment variable is not set.');
+  process.exit(1); // Exit if key is missing
+}
 
 const openai = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
   apiKey: process.env.OPENROUTER_API_KEY,
   defaultHeaders: {
-    "HTTP-Referer": process.env.SITE_URL || "https://github.com/mcp-pr-reviewer", // Optional site URL for rankings
-    "X-Title": process.env.SITE_NAME || "MCP PR Reviewer", // Optional site title for rankings
+    "HTTP-Referer": process.env.SITE_URL || "https://github.com/mcp-pr-reviewer", 
+    "X-Title": process.env.SITE_NAME || "MCP PR Reviewer",
   },
 });
 
-// Add MCP capabilities endpoint
+// --- MCP Capabilities Endpoint ---
 app.get('/capabilities', (req, res) => {
   res.json({
-    name: "PR Reviewer",
-    version: "1.0.1",
+    name: "PR Reviewer LLM Analyzer", // More specific name
+    version: "1.1.0", // Updated version
     tools: [
       {
-        name: "analyze_pr",
-        description: "Analyze a GitHub pull request for quality, issues, and make approval decisions",
+        name: "analyze_pr_diff",
+        description: "Analyzes a provided code diff string using an LLM (via OpenRouter) and returns a structured review.",
         parameters: [
           {
-            name: "owner",
+            name: "diff",
             type: "string",
-            description: "The repository owner (username or organization)"
+            description: "The code diff content to be analyzed."
           },
           {
-            name: "repo",
+            name: "prompt_instructions", // Optional custom prompt
             type: "string",
-            description: "The repository name"
-          },
-          {
-            name: "pr_number",
-            type: "number",
-            description: "The pull request number to analyze"
+            description: "Optional: Specific instructions to include in the system prompt for the LLM.",
+            required: false
           }
         ]
       }
@@ -48,95 +50,95 @@ app.get('/capabilities', (req, res) => {
   });
 });
 
-// Add execute endpoint for MCP protocol
+// --- MCP Execute Endpoint ---
 app.post('/execute', async (req, res) => {
   try {
     const { name, args } = req.body;
     
-    if (name !== 'analyze_pr') {
-      return res.status(400).json({ error: 'Unknown tool' });
+    if (name !== 'analyze_pr_diff') {
+      return res.status(400).json({ error: 'Unknown tool name.', message: `Tool '${name}' is not supported.` });
     }
     
-    const { owner, repo, pr_number } = args;
+    const { diff, prompt_instructions } = args;
     
-    if (!owner || !repo || !pr_number) {
+    if (!diff) {
       return res.status(400).json({ 
-        error: 'Missing parameters', 
-        message: 'Required parameters: owner, repo, pr_number' 
+        error: 'Missing required parameter', 
+        message: 'The 'diff' parameter is required.' 
       });
     }
-    
-    // We'll implement this analysis later by calling the analyze-pr.js script
-    // For now, return a placeholder response
-    console.log(`Received request to analyze PR #${pr_number} in ${owner}/${repo}`);
-    
-    res.json({
-      content: `PR Analysis for ${owner}/${repo}#${pr_number} would appear here.
-Please use the command line tool directly for full functionality:
 
-npx mcp-pr-reviewer analyze ${owner} ${repo} ${pr_number}
+    // Construct the prompt
+    const defaultPrompt = `
+      You are a code reviewer assistant integrated with the GitHub MCP (Model Context Protocol) server. 
+      Analyze the following pull request diff and provide a detailed assessment with the following structure:
 
-The MCP integration is under development.`
+      1. DECISION: Start with either "APPROVE" or "REJECT" on the first line.
+      
+      2. SUMMARY: Provide a brief 1-2 sentence summary of what the PR changes accomplish.
+      
+      3. KEY POINTS: List 3-5 bullet points about the PR that cover:
+         • Features or improvements added
+         • Potential disadvantages or drawbacks
+         • Security considerations
+         • Performance implications
+         • Code quality observations
+      
+      Be specific with your observations, referencing actual code when relevant. If you approve the PR, still mention any minor issues or suggestions for improvement. If you reject it, clearly explain the critical issues that need to be addressed.
+      
+      Base your assessment on:
+      - Code quality and best practices
+      - Security vulnerabilities
+      - Performance implications
+      - Logic errors or bugs
+      - Architecture and design considerations
+      
+      Be thorough but concise in your review.
+    `;
+    const systemPrompt = prompt_instructions ? `${defaultPrompt}\n\nAdditional Instructions: ${prompt_instructions}` : defaultPrompt;
+
+    console.log(`Analyzing PR diff (${diff.length} characters) via OpenRouter...`);
+    
+    const completion = await openai.chat.completions.create({
+      model: process.env.LLM_MODEL || "openrouter/optimus-alpha", 
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Here is the PR diff to analyze:\n\n${diff}` }
+      ],
+      max_tokens: 6000, 
+      temperature: 0.2, 
     });
+
+    if (!completion.choices || !completion.choices[0] || !completion.choices[0].message || !completion.choices[0].message.content) {
+      console.error('Invalid response structure from OpenRouter API:', completion);
+      throw new Error('Invalid response structure from LLM API');
+    }
+
+    const analysisResult = completion.choices[0].message.content;
+    console.log('LLM analysis completed successfully.');
     
+    // Return result in MCP format
+    res.json({ content: analysisResult });
+
   } catch (error) {
     console.error('Error during tool execution:', error);
     res.status(500).json({ 
       error: 'Execution failed', 
-      message: error.message 
+      message: error.message, 
+      details: error.response ? error.response.data : (error.stack || null)
     });
   }
 });
 
+// --- Remove old /analyze endpoint ---
+/*
 app.post('/analyze', async (req, res) => {
-  try {
-    const { diff, prompt } = req.body;
-    
-    if (!diff) {
-      return res.status(400).json({ error: 'Missing PR diff in request' });
-    }
-    
-    if (!prompt) {
-      return res.status(400).json({ error: 'Missing analysis prompt in request' });
-    }
-
-    console.log(`Analyzing PR diff (${diff.length} characters) with LLM...`);
-    
-    const completion = await openai.chat.completions.create({
-      model: process.env.LLM_MODEL || "openrouter/optimus-alpha",
-      messages: [
-        { role: "system", content: prompt },
-        { role: "user", content: `Here is the PR diff to analyze:\n\n${diff}` }
-      ],
-      max_tokens: 6000, // Increased to allow for more detailed response
-      temperature: 0.2, // Lower temperature for more deterministic responses
-    });
-
-    if (!completion.choices || !completion.choices[0] || !completion.choices[0].message) {
-      throw new Error('Invalid response structure from LLM API');
-    }
-
-    const response = completion.choices[0].message.content;
-    console.log('LLM analysis completed successfully');
-    
-    res.json({ response });
-  } catch (error) {
-    console.error('Error during LLM analysis:', error);
-    
-    // Provide more detailed error response
-    if (error.response) {
-      console.error('API error details:', error.response.data);
-    }
-    
-    res.status(500).json({ 
-      error: 'Analysis failed', 
-      message: error.message,
-      details: error.response ? error.response.data : null
-    });
-  }
+  // ... old implementation ...
 });
+*/
 
 app.listen(port, () => {
-  console.log(`LLM provider for PR analysis running on port ${port}`);
+  console.log(`MCP PR Reviewer LLM Analyzer server running on port ${port}`);
   console.log(`Using model: ${process.env.LLM_MODEL || "openrouter/optimus-alpha"}`);
+  console.log('Waiting for /execute calls for the 'analyze_pr_diff' tool...');
 });
