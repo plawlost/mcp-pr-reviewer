@@ -71,35 +71,6 @@ program
          }
       }
 
-      // --- Start MCP GitHub Server ---
-      try {
-        console.log(chalk.blue(`Attempting to start MCP GitHub server on port ${options.mcpPort}...`));
-        mcpServerProcess = startMCPGitHubServerProcess({ port: parseInt(options.mcpPort) });
-        processesToClean.push(mcpServerProcess); // Add ChildProcess for cleanup
-        
-        // Handle MCP server output/errors for better diagnostics
-        mcpServerProcess.stdout.on('data', (data) => console.log(chalk.dim(`[MCP Server] ${data.toString().trim()}`)));
-        mcpServerProcess.stderr.on('data', (data) => {
-            const stderrStr = data.toString().trim();
-            // Filter out expected startup messages if necessary
-            if (stderrStr && !stderrStr.includes('GitHub MCP Server running')) {
-                console.error(chalk.red(`[MCP Server ERR] ${stderrStr}`));
-            }
-        });
-        mcpServerProcess.on('error', (err) => {
-            console.error(chalk.red(`MCP Server process error: ${err.message}`));
-            cleanupProcesses(processesToClean);
-            process.exit(1);
-        });
-
-        // Need to wait a bit for the spawned server to be ready
-        await new Promise(resolve => setTimeout(resolve, 3000)); // Increased wait time
-
-        console.log(chalk.green('MCP GitHub server process started.'));
-      } catch (error) {
-        throw new Error(`Failed to start MCP GitHub server process: ${error.message}`);
-      }
-      
       // --- Start LLM Provider Server ---
       try {
         console.log(chalk.blue(`Starting LLM provider on port ${options.llmPort}...`));
@@ -140,7 +111,7 @@ program
         stdio: 'inherit', // Show analysis logs directly
         env: { // Pass necessary env vars
             ...process.env, 
-            MCP_GITHUB_PORT: options.mcpPort, // Ensure analyzer knows where MCP server is
+            // MCP_GITHUB_PORT: options.mcpPort, // No longer needed here as analyze-pr spawns MCP server itself
             LLM_PROVIDER_PORT: options.llmPort // Ensure analyzer knows where LLM provider is
         } 
       });
