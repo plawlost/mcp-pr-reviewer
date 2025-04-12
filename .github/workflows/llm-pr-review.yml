@@ -1,0 +1,140 @@
+name: LLM-Powered PR Review
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  llm-pr-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies 
+        run: |
+          # Install MCP GitHub server
+          npm install @modelcontextprotocol/server-github
+          # Install dependencies for our scripts
+          npm install node-fetch express openai
+
+      - name: Get PR details
+        id: pr_details
+        run: |
+          echo "PR_NUMBER=${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+          echo "REPO_OWNER=${{ github.repository_owner }}" >> $GITHUB_ENV
+          echo "REPO_NAME=${{ github.event.repository.name }}" >> $GITHUB_ENV
+
+      - name: Analyze PR with LLM
+        id: llm-analysis
+        run: |
+          # Start MCP GitHub server (port 8080)
+          echo "Starting MCP GitHub server..."
+          npx @modelcontextprotocol/server-github &
+          MCP_GITHUB_PID=$!
+          
+          # Wait a moment for MCP GitHub server to initialize
+          sleep 3
+          
+          # Start the custom LLM provider (port 8090)
+          echo "Starting LLM provider server..."
+          node .github/scripts/mcp-llm-provider.js &
+          LLM_PROVIDER_PID=$!
+          
+          # Wait a moment for LLM provider to initialize
+          sleep 3
+
+          # Run the analysis script with repo owner, name, and PR number
+          echo "Running PR analysis for $REPO_OWNER/$REPO_NAME PR #$PR_NUMBER..."
+          ANALYSIS=$(node .github/scripts/analyze-pr.js "$REPO_OWNER" "$REPO_NAME" "$PR_NUMBER")
+          
+          # Extract the decision (first line of the analysis)
+          DECISION=$(echo "$ANALYSIS" | head -n 1)
+          
+          # Determine if PR is acceptable based on first line containing APPROVE
+          if [[ "$DECISION" == *"APPROVE"* ]]; then
+            echo "pr_decision=approve" >> $GITHUB_OUTPUT
+            PR_STATUS="✅ **APPROVED**"
+          else
+            echo "pr_decision=reject" >> $GITHUB_OUTPUT
+            PR_STATUS="❌ **NEEDS REVIEW**"
+          fi
+          
+          # Create formatted comment with the complete analysis
+          COMMENT="## PR Review Analysis: $PR_STATUS\n\n$ANALYSIS"
+          echo "pr_comment<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$COMMENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          # Terminate the servers
+          echo "Shutting down servers..."
+          kill $MCP_GITHUB_PID
+          kill $LLM_PROVIDER_PID
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          MCP_GITHUB_PORT: 8080
+          LLM_PROVIDER_PORT: 8090
+          LLM_MODEL: ${{ secrets.LLM_MODEL || 'openrouter/optimus-alpha' }}
+
+      - name: Process PR based on LLM decision
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const decision = '${{ steps.llm-analysis.outputs.pr_decision }}';
+            const comment = `${{ steps.llm-analysis.outputs.pr_comment }}`;
+
+            // Add comment with LLM analysis
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+            if (decision === 'approve') {
+              // Auto-merge the PR
+              await github.rest.pulls.createReview({
+                pull_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                event: 'APPROVE',
+                body: 'Approved based on LLM analysis'
+              });
+
+              // Attempt to merge the PR
+              try {
+                await github.rest.pulls.merge({
+                  pull_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  merge_method: 'squash'
+                });
+                console.log("PR successfully merged");
+              } catch (error) {
+                console.log(`Could not auto-merge: ${error.message}`);
+              }
+            } else {
+              // Add needs-review label
+              try {
+                await github.rest.issues.addLabels({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  labels: ['needs-review']
+                });
+              } catch (error) {
+                console.log(`Could not add label: ${error.message}`);
+              }
+            }
