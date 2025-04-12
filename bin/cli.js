@@ -6,7 +6,7 @@ const { program } = require('commander');
 const chalk = require('chalk');
 const packageJson = require('../package.json');
 // Import the main module functions
-const { startMCPGitHubServer, startLLMProvider } = require('../index.js'); 
+const { startMCPGitHubServerProcess, startLLMProvider } = require('../index.js'); 
 
 // Define the path to the library directory
 const LIB_DIR = path.join(__dirname, '..', 'lib');
@@ -19,9 +19,9 @@ const cleanupProcesses = (processes) => {
       if (p.kill) { // ChildProcess
         console.log(chalk.dim(`Sending SIGTERM to process ${p.pid}...`));
         p.kill('SIGTERM');
-      } else if (p.close) { // MCP Server instance
-        console.log(chalk.dim('Closing MCP GitHub server...'));
-        p.close().catch(err => console.error(chalk.red('Error closing MCP server:'), err));
+      } else if (p.close) { // MCP Server instance - This case might no longer be needed if analyze always spawns
+        // console.log(chalk.dim('Closing MCP GitHub server...'));
+        // p.close().catch(err => console.error(chalk.red('Error closing MCP server:'), err));
       }
     }
   });
@@ -44,7 +44,7 @@ program
   .option('--mcp-port <port>', 'MCP GitHub server port (default: 8080)', '8080')
   .option('--llm-port <port>', 'LLM provider port (default: 8090)', '8090')
   .action(async (owner, repo, prNumber, options) => {
-    let mcpServerInstance = null;
+    let mcpServerProcess = null;
     let llmProviderProcess = null;
     const processesToClean = [];
 
@@ -74,11 +74,30 @@ program
       // --- Start MCP GitHub Server ---
       try {
         console.log(chalk.blue(`Attempting to start MCP GitHub server on port ${options.mcpPort}...`));
-        mcpServerInstance = await startMCPGitHubServer({ port: parseInt(options.mcpPort) });
-        processesToClean.push(mcpServerInstance); // Add for cleanup
-        console.log(chalk.green('MCP GitHub server started.'));
+        mcpServerProcess = startMCPGitHubServerProcess({ port: parseInt(options.mcpPort) });
+        processesToClean.push(mcpServerProcess); // Add ChildProcess for cleanup
+        
+        // Handle MCP server output/errors for better diagnostics
+        mcpServerProcess.stdout.on('data', (data) => console.log(chalk.dim(`[MCP Server] ${data.toString().trim()}`)));
+        mcpServerProcess.stderr.on('data', (data) => {
+            const stderrStr = data.toString().trim();
+            // Filter out expected startup messages if necessary
+            if (stderrStr && !stderrStr.includes('GitHub MCP Server running')) {
+                console.error(chalk.red(`[MCP Server ERR] ${stderrStr}`));
+            }
+        });
+        mcpServerProcess.on('error', (err) => {
+            console.error(chalk.red(`MCP Server process error: ${err.message}`));
+            cleanupProcesses(processesToClean);
+            process.exit(1);
+        });
+
+        // Need to wait a bit for the spawned server to be ready
+        await new Promise(resolve => setTimeout(resolve, 3000)); // Increased wait time
+
+        console.log(chalk.green('MCP GitHub server process started.'));
       } catch (error) {
-        throw new Error(`Failed to start MCP GitHub server: ${error.message}`);
+        throw new Error(`Failed to start MCP GitHub server process: ${error.message}`);
       }
       
       // --- Start LLM Provider Server ---
