@@ -3,36 +3,17 @@
 [![npm version](https://img.shields.io/npm/v/mcp-pr-reviewer.svg)](https://www.npmjs.com/package/mcp-pr-reviewer)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-> Intelligent PR reviews powered by the Model Context Protocol and LLMs
+> Intelligent PR reviews powered by the Model Context Protocol and LLMs.
 
-MCP PR Reviewer analyzes GitHub Pull Requests using AI and provides detailed feedback, feature analysis, and potential issue detection, with the option to auto-approve safe changes.
-
-<!--
-<p align="center">
-  <img src="https://github.com/plawlost/mcp-pr-reviewer/raw/main/docs/screenshot.png" alt="PR Reviewer Screenshot" width="700">
-</p>
--->
+MCP PR Reviewer analyzes GitHub Pull Requests using AI, leveraging the Model Context Protocol for secure GitHub integration and providing detailed feedback.
 
 ## 🚀 Features
 
-- **MCP GitHub Integration** - Uses Model Context Protocol to securely fetch and analyze PRs
-- **Detailed Analysis** - Provides decision, summary, and key points for each PR 
-- **Auto-Merge Capability** - Automatically approves and merges clean PRs
-- **Customizable Models** - Select from various AI models via OpenRouter
-- **Security-First Design** - Your code stays within your infrastructure
-
-## 📋 PR Review Output
-
-Each review provides a structured analysis:
-
-1. **Decision** - Clear APPROVE or REJECT verdict
-2. **Summary** - Brief explanation of PR changes
-3. **Key Points** - 3-5 bullets covering:
-   - ✨ Features added
-   - ⚠️ Potential drawbacks
-   - 🔒 Security considerations
-   - ⚡ Performance impact
-   - 💻 Code quality observations
+- **MCP GitHub Integration:** Securely fetches PR data using `@modelcontextprotocol/server-github`.
+- **AI-Powered Analysis:** Uses configurable LLMs via OpenRouter for insightful code review.
+- **Structured Feedback:** Provides a clear decision (Approve/Reject), summary, and key points.
+- **CLI & Server Modes:** Usable both directly for analysis and as a server for integrations.
+- **Customizable:** Choose your preferred LLM model.
 
 ## 🔧 Installation
 
@@ -40,103 +21,110 @@ Each review provides a structured analysis:
 # Install globally
 npm install -g mcp-pr-reviewer
 
-# Or use with npx
-npx mcp-pr-reviewer
+# Or use with npx without installing
+npx mcp-pr-reviewer --help
 ```
 
-## 🛠️ GitHub Actions Setup
+## 💻 Usage
 
-1. Create `.github/workflows/pr-review.yml`:
+### Prerequisites
 
-```yaml
-name: PR Review
-on:
-  pull_request:
-    types: [opened, reopened, synchronize]
-jobs:
-  review:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-      - run: npx mcp-pr-reviewer
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          LLM_MODEL: ${{ secrets.LLM_MODEL || 'openrouter/optimus-alpha' }}
-```
+Set the following environment variables:
 
-2. Add your `OPENROUTER_API_KEY` in GitHub repository secrets
+- `GITHUB_TOKEN`: Your GitHub Personal Access Token with `repo` scope.
+- `OPENROUTER_API_KEY`: Your API key from [OpenRouter.ai](https://openrouter.ai).
 
-## 💻 CLI Usage
+### Analyze a Pull Request
 
 ```bash
-# Review a specific PR
-mcp-pr-reviewer analyze owner repo pr-number
+# Format
+mcp-pr-reviewer analyze <owner> <repo> <pr-number> [options]
 
 # Example
 mcp-pr-reviewer analyze octocat hello-world 123
 
-# Start in server mode (for GitHub Actions)
-mcp-pr-reviewer server
+# Example with specific ports and model
+mcp-pr-reviewer analyze myorg my-repo 456 --mcp-port 8081 --llm-port 8091 --model openrouter/anthropic/claude-3-haiku
 ```
 
-Required environment variables:
-- `OPENROUTER_API_KEY`: Your API key from [OpenRouter](https://openrouter.ai)
-- `GITHUB_TOKEN`: For GitHub API access (auto-provided in Actions)
+**Options:**
+- `--mcp-port <port>`: Port for the internal MCP GitHub server (default: 8080).
+- `--llm-port <port>`: Port for the internal LLM provider server (default: 8090).
+- `-m, --model <model>`: Specify the OpenRouter model ID (default: `openrouter/optimus-alpha`).
 
-Optional environment variables:
-- `LLM_MODEL`: Alternative OpenRouter model (default: `openrouter/optimus-alpha`)
-- `MCP_GITHUB_PORT`: Port for MCP GitHub server (default: 8080)
-- `LLM_PROVIDER_PORT`: Port for LLM provider (default: 8090)
+### Run as a Server (for Integrations)
 
-## 🧩 Architecture
-
-The system uses two complementary components:
-
-1. **MCP GitHub Server** - Leverages Model Context Protocol for standardized GitHub access
-2. **LLM Provider** - Handles AI analysis via OpenRouter
-
-Together, they securely analyze PR diffs, provide detailed feedback, and automate approval processes.
-
-## ⚙️ Configuration
-
-### Custom LLM Model
+The `server` command starts *only* the LLM provider component, making it available as an MCP server for other tools or integrations (like GitHub Actions).
 
 ```bash
-# In your terminal
-export LLM_MODEL="openrouter/anthropic/claude-3-opus"
-mcp-pr-reviewer analyze owner repo pr-number
-
-# Or in GitHub Actions (repository secrets)
-LLM_MODEL: openrouter/anthropic/claude-3-opus
+# Start the LLM Provider server
+mcp-pr-reviewer server --port 8012 --model openrouter/google/gemini-pro
 ```
 
-### Custom Review Criteria
+This allows external systems to call its `analyze_pr` capability.
 
-Edit the prompt template in your local installation:
+## 🧩 MCP Configuration (Example for Cursor)
 
-```bash
-# Find the installation
-which mcp-pr-reviewer
+You can integrate `mcp-pr-reviewer` with tools like Cursor using an `mcp.json` file. Here's an example configuration:
 
-# Edit the analyze-pr.js file in the installation directory
+```json
+{
+  "mcpServers": {
+    "GitHub MCP": {
+      "command": "npx",
+      "type": "stdio",
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_GITHUB_PAT_HERE"
+      },
+      "args": [
+        "@modelcontextprotocol/server-github"
+      ]
+    },
+    "PR Reviewer": {
+      "command": "npx",
+      "type": "http",
+      "baseUrl": "http://localhost:8012",
+      "env": {
+        "OPENROUTER_API_KEY": "YOUR_OPENROUTER_KEY_HERE"
+      },
+      "args": [
+        "mcp-pr-reviewer",
+        "server",
+        "--port",
+        "8012"
+      ]
+    }
+  }
+}
 ```
+
+**Note:** Replace placeholders like `YOUR_GITHUB_PAT_HERE` and `YOUR_OPENROUTER_KEY_HERE` with your actual credentials.
+
+## 🏗️ Architecture
+
+The `analyze` command orchestrates two main components:
+
+1.  **MCP GitHub Server:** An instance of `@modelcontextprotocol/server-github` started internally to handle secure communication with the GitHub API.
+2.  **LLM Provider Server:** A simple Express server (`lib/mcp-llm-provider.js`) started internally that:
+    *   Accepts analysis requests.
+    *   Communicates with the OpenRouter API to get the LLM analysis.
+
+The `lib/analyze-pr.js` script coordinates the process:
+1.  Connects to the running MCP GitHub Server (via HTTP) to fetch the PR diff.
+2.  Sends the diff to the running LLM Provider Server (via HTTP) for analysis.
+3.  Outputs the formatted review.
+
+The `server` command only starts the LLM Provider Server, exposing it for external MCP calls.
 
 ## 🤝 Contributing
 
-Contributions welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please fork the repository and submit a Pull Request.
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+1.  Fork the repository
+2.  Create your feature branch (`git checkout -b feature/amazing-feature`)
+3.  Commit your changes (`git commit -m 'Add some amazing feature'`)
+4.  Push to the branch (`git push origin feature/amazing-feature`)
+5.  Open a Pull Request
 
 ## 📜 License
 
@@ -144,17 +132,14 @@ MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 📚 FAQ
 
-**Q: What is Model Context Protocol (MCP)?**  
-A: MCP is an open protocol that enables AI systems to securely access data sources and tools. We use it to integrate with GitHub securely.
+**Q: What is Model Context Protocol (MCP)?**
+A: An open standard allowing AI models to securely interact with tools and data sources. See [modelcontext.dev](https://modelcontext.dev).
 
-**Q: Does it support private repositories?**  
-A: Yes, when the proper GitHub token with appropriate permissions is provided.
+**Q: Does it work with private repositories?**
+A: Yes, ensure your `GITHUB_TOKEN` has the necessary permissions (e.g., `repo` scope).
 
-**Q: Can I use a different LLM provider?**  
-A: Yes, by modifying the `baseURL` in the LLM provider script to point to your provider.
+**Q: Can I use models other than OpenRouter?**
+A: Currently, it's hardcoded for OpenRouter. Modifying `lib/mcp-llm-provider.js` would be required to support other providers.
 
-**Q: What LLM models work best?**  
-A: Models with strong code understanding like Claude 3 Opus or Optimus Alpha work well for PR reviews.
-
-**Q: How does this differ from other code review tools?**  
-A: MCP PR Reviewer provides deeper analysis beyond syntax checking, focusing on logic, architecture, and potential issues.
+**Q: How is this different from GitHub Copilot's PR Summary?**
+A: This tool provides a more opinionated review, including an Approve/Reject decision and specific feedback points based on a configurable prompt, rather than just a summary.
