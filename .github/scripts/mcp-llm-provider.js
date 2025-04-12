@@ -17,6 +17,77 @@ const openai = new OpenAI({
   },
 });
 
+// Add MCP capabilities endpoint
+app.get('/capabilities', (req, res) => {
+  res.json({
+    name: "PR Reviewer",
+    version: "1.0.1",
+    tools: [
+      {
+        name: "analyze_pr",
+        description: "Analyze a GitHub pull request for quality, issues, and make approval decisions",
+        parameters: [
+          {
+            name: "owner",
+            type: "string",
+            description: "The repository owner (username or organization)"
+          },
+          {
+            name: "repo",
+            type: "string",
+            description: "The repository name"
+          },
+          {
+            name: "pr_number",
+            type: "number",
+            description: "The pull request number to analyze"
+          }
+        ]
+      }
+    ]
+  });
+});
+
+// Add execute endpoint for MCP protocol
+app.post('/execute', async (req, res) => {
+  try {
+    const { name, args } = req.body;
+    
+    if (name !== 'analyze_pr') {
+      return res.status(400).json({ error: 'Unknown tool' });
+    }
+    
+    const { owner, repo, pr_number } = args;
+    
+    if (!owner || !repo || !pr_number) {
+      return res.status(400).json({ 
+        error: 'Missing parameters', 
+        message: 'Required parameters: owner, repo, pr_number' 
+      });
+    }
+    
+    // We'll implement this analysis later by calling the analyze-pr.js script
+    // For now, return a placeholder response
+    console.log(`Received request to analyze PR #${pr_number} in ${owner}/${repo}`);
+    
+    res.json({
+      content: `PR Analysis for ${owner}/${repo}#${pr_number} would appear here.
+Please use the command line tool directly for full functionality:
+
+npx mcp-pr-reviewer analyze ${owner} ${repo} ${pr_number}
+
+The MCP integration is under development.`
+    });
+    
+  } catch (error) {
+    console.error('Error during tool execution:', error);
+    res.status(500).json({ 
+      error: 'Execution failed', 
+      message: error.message 
+    });
+  }
+});
+
 app.post('/analyze', async (req, res) => {
   try {
     const { diff, prompt } = req.body;
